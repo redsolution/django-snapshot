@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
-from optparse import OptionParser
-from subprocess import Popen, PIPE
+from django.utils import simplejson
+from shutil import rmtree
+from snapshot import settings
+from subprocess import Popen, PIPE, call
 import datetime
 import logging
-import shutil
-from snapshot import settings
-from django.utils import simplejson
+import os
+import sys
+
 
 logging.getLogger().setLevel(logging.DEBUG)
 
@@ -21,6 +21,7 @@ class BackupTarget(object):
     '''
     name = 'backup_target'
     dump_file = None
+    unpack_path = ''
 
     def snapshot(self):
         raise MustOverride
@@ -37,11 +38,10 @@ class BackupTarget(object):
             'dump_file': self.dump_file,
         }
 
-    def load_settings(self, json_string):
+    def load_settings(self, json):
         '''
-        Load data from JSON string
+        Load data from dictionary
         '''
-        json = simplejson.loads(json_string)
         for item in json:
             if item.get('name') == self.name:
                 self.dump_file = item.get('dump_file')
@@ -112,9 +112,9 @@ class PostgresDatabase(Database):
         (stdout, stderr) = pipe.communicate(self.connection_settings['password'])
 
         if pipe.wait() != 0:
-            logging.error('Error in snapshot')
+            logging.error('Error in database snapshot')
         else:
-            logging.info('Snapshot finished')
+            logging.info('Database snapshot finished')
             self.dump_file = 'database_postgres_backup.%s.sql' % (
                 datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
             file = open(os.path.join(settings.SNAPSHOTS_DIR, self.dump_file), 'w')
@@ -139,7 +139,7 @@ class PostgresDatabase(Database):
             args += ['--port=%s' % self.connection_settings['port']]
 
         command = 'psql %s < %s' % (' '.join(args), os.path.join(
-            settings.SNAPSHOTS_DIR, self.dump_file))
+            self.unpack_path, self.dump_file))
 
         pipe = Popen(command, shell=True, stdin=PIPE, stdout=PIPE)
 
@@ -156,6 +156,7 @@ class Directory(BackupTarget):
     '''File directory backup target'''
     # TODO: filemask = ''
     backup_dir = None
+    remove_old_files = True
 
     def __init__(self, backup_dir):
         self.backup_dir = backup_dir
@@ -172,9 +173,9 @@ class Directory(BackupTarget):
         pipe = Popen(command, shell=True)
 
         if pipe.wait() != 0:
-            logging.error('Error while snapshot')
+            logging.error('Error while snapshot directory')
         else:
-            logging.info('Snapshot successfully')
+            logging.info('Snapshot directory successfully')
 
     def restore(self):
         if not self.dump_file:
@@ -183,14 +184,18 @@ class Directory(BackupTarget):
 
         logging.info('Restoring from %s' % self.dump_file)
 
-        command = 'tar xf %s -C %s .' % (os.path.join(
-            settings.SNAPSHOTS_DIR, self.dump_file), self.backup_dir)
+        if self.remove_old_files:
+            rmtree(self.backup_dir)
+            os.mkdir(self.backup_dir)
+
+        command = 'tar xf %s -C %s .' % (os.path.join(self.unpack_path,
+            self.dump_file), self.backup_dir)
 
         pipe = Popen(command, shell=True)
         if pipe.wait() != 0:
-            logging.error('Error while restoring')
+            logging.error('Error while restoring directory')
         else:
-            logging.info('Restored successfully')
+            logging.info('Directory restored successfully ')
 
 class MediaDirectory(Directory):
     name = 'media'
@@ -234,7 +239,7 @@ class SnapSite(object):
             indent=4,
         ))
         json_file.close()
-        
+
         # and gzip contents to snapshot
         archive_name = 'snapshot.%s.tar.gz' % (datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
 
@@ -246,7 +251,30 @@ class SnapSite(object):
 
         pipe = Popen(command, shell=True)
         if pipe.wait() != 0:
-            logging.error('Error while restoring')
+            logging.error('Error while snapshot')
         else:
             logging.info('Snapshot successfully')
 
+    def restore(self, filename):
+        # first, unpack snapshot to temporary directory
+        unpack_path = os.path.join(settings.SNAPSHOTS_DIR, 'tmp')
+        # delete old tmp directory if exixsts
+        if os.path.exists(unpack_path):
+            rmtree(unpack_path)
+        os.mkdir(unpack_path)
+        pipe = Popen('tar xf %s -C %s' % (os.path.join(settings.SNAPSHOTS_DIR,
+            filename), unpack_path), shell=True)
+        pipe.wait()
+        # read settings from file
+        json_settings_file = open(os.path.join(settings.SNAPSHOTS_DIR, 'tmp/info.json'), 'r')
+        json_settings = simplejson.loads(json_settings_file.read())
+        # load settings into target instances
+        self.database.unpack_path = unpack_path
+        self.media.unpack_path = unpack_path
+        self.database.load_settings(json_settings)
+        self.media.load_settings(json_settings)
+        # restore
+        self.media.restore()
+        self.database.restore()
+        # remove tmp dir
+        rmtree(unpack_path)
