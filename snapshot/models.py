@@ -215,17 +215,22 @@ class SnapSite(object):
         database - dictionary with database settings
         settings - imported settings module from the site
     '''
-    settings = None
     media = None
     database = None
 
-    def __init__(self, settings=None):
-        if settings:
-            self.settings = settings
+    def __init__(self, arg_settings=None):
+        if arg_settings:
+            django_settings = arg_settings
         else:
             from django.conf import settings
-        self.media = MediaDirectory(settings)
-        self.database = PostgresDatabase(settings)
+            django_settings = settings
+
+        self.media = MediaDirectory(django_settings)
+        self.database = PostgresDatabase(django_settings)
+        # create snapshots folder if not exists
+        from snapshot import settings
+        if not os.path.exists(settings.SNAPSHOTS_DIR):
+            os.mkdir(settings.SNAPSHOTS_DIR)
         return super(SnapSite, self).__init__()
 
     def snapshot(self):
