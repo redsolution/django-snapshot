@@ -32,18 +32,24 @@ class Command(BaseCommand):
             else:
                 number = 0
 
-            snapshots = os.listdir(snapshot_settings.SNAPSHOTS_DIR)
             try:
+                snapshots = os.listdir(snapshot_settings.SNAPSHOTS_DIR)
+                snapshots = sorted(snapshots)
                 snapshot_filename = snapshots[number]
             except IndexError:
                 raise CommandError('Incorrect snapshot number')
+            except OSError:
+                raise CommandError("Snapshots wasn't created")
+
             site = SnapSite(settings)
             site.restore(snapshot_filename)
         elif action == 'list':
-            snapshots = os.listdir(snapshot_settings.SNAPSHOTS_DIR)
+            try:
+                snapshots = os.listdir(snapshot_settings.SNAPSHOTS_DIR)
+                snapshots = sorted(snapshots)
+            except OSError:
+                raise CommandError("Snapshots wasn't created")
             for i in range(len(snapshots)):
                 print '%d: %s' % (i, snapshots[i])
         else:
             print self.help
-
-
