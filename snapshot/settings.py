@@ -4,3 +4,8 @@ from os.path import join, dirname
 
 SNAPSHOTS_DIR = getattr(project_settings, 'SNAPSHOTS_DIR',
     join(dirname(project_settings.MEDIA_ROOT), 'snapshots'))
+
+SNAPSHOT_TARGETS = getattr(project_settings, 'SNAPSHOT_TARGETS', [
+    'snapshot.models.MediaDirectory',
+    'snapshot.models.PostgresDatabase',
+])

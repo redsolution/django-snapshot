@@ -3,6 +3,8 @@ from django.utils import simplejson
 from shutil import rmtree
 from snapshot import settings
 from subprocess import Popen, PIPE, call
+from snapshot.settings import SNAPSHOT_TARGETS, SNAPSHOTS_DIR
+from snapshot.utils import import_item
 import datetime
 import logging
 import os
@@ -195,7 +197,7 @@ class Directory(BackupTarget):
         if pipe.wait() != 0:
             logging.error('Error while restoring directory')
         else:
-            logging.info('Directory restored successfully ')
+            logging.info('Directory restored successfully')
 
 class MediaDirectory(Directory):
     name = 'media'
@@ -215,8 +217,7 @@ class SnapSite(object):
         database - dictionary with database settings
         settings - imported settings module from the site
     '''
-    media = None
-    database = None
+    targets = []
 
     def __init__(self, arg_settings=None):
         if arg_settings:
@@ -225,22 +226,24 @@ class SnapSite(object):
             from django.conf import settings
             django_settings = settings
 
-        self.media = MediaDirectory(django_settings)
-        self.database = PostgresDatabase(django_settings)
+        # get targets
+        for target_classname in SNAPSHOT_TARGETS:
+            Target = import_item(target_classname)
+            self.targets.append(Target(django_settings))
+
         # create snapshots folder if not exists
-        from snapshot import settings
-        if not os.path.exists(settings.SNAPSHOTS_DIR):
-            os.mkdir(settings.SNAPSHOTS_DIR)
+        if not os.path.exists(SNAPSHOTS_DIR):
+            os.mkdir(SNAPSHOTS_DIR)
         return super(SnapSite, self).__init__()
 
     def snapshot(self):
-        self.database.snapshot()
-        self.media.snapshot()
+        for target in self.targets:
+            target.snapshot()
 
         # save settings to file
-        json_file = open(os.path.join(settings.SNAPSHOTS_DIR, 'info.json'), 'w')
+        json_file = open(os.path.join(SNAPSHOTS_DIR, 'info.json'), 'w')
         json_file.write(simplejson.dumps(
-            [self.database.save_settings(), self.media.save_settings()],
+            [target.save_settings() for target in self.targets],
             indent=4,
         ))
         json_file.close()
@@ -249,9 +252,9 @@ class SnapSite(object):
         archive_name = 'snapshot.%s.tar.gz' % (datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
 
         command = 'tar czf %(archive_name)s --remove-files -C %(path)s %(files)s ' % ({
-            'archive_name': os.path.join(settings.SNAPSHOTS_DIR, archive_name),
-            'path': settings.SNAPSHOTS_DIR,
-            'files': ' '.join([self.database.dump_file, self.media.dump_file, 'info.json']),
+            'archive_name': os.path.join(SNAPSHOTS_DIR, archive_name),
+            'path': SNAPSHOTS_DIR,
+            'files': ' '.join([target.dump_file for target in self.targets] + ['info.json']),
         })
 
         pipe = Popen(command, shell=True)
@@ -262,24 +265,23 @@ class SnapSite(object):
 
     def restore(self, filename):
         # first, unpack snapshot to temporary directory
-        unpack_path = os.path.join(settings.SNAPSHOTS_DIR, 'tmp')
+        unpack_path = os.path.join(SNAPSHOTS_DIR, 'tmp')
         # delete old tmp directory if exixsts
         if os.path.exists(unpack_path):
             rmtree(unpack_path)
         os.mkdir(unpack_path)
-        pipe = Popen('tar xf %s -C %s' % (os.path.join(settings.SNAPSHOTS_DIR,
+        pipe = Popen('tar xf %s -C %s' % (os.path.join(SNAPSHOTS_DIR,
             filename), unpack_path), shell=True)
         pipe.wait()
         # read settings from file
-        json_settings_file = open(os.path.join(settings.SNAPSHOTS_DIR, 'tmp/info.json'), 'r')
+        json_settings_file = open(os.path.join(SNAPSHOTS_DIR, 'tmp/info.json'), 'r')
         json_settings = simplejson.loads(json_settings_file.read())
         # load settings into target instances
-        self.database.unpack_path = unpack_path
-        self.media.unpack_path = unpack_path
-        self.database.load_settings(json_settings)
-        self.media.load_settings(json_settings)
+        for target in self.targets:
+            target.unpack_path = unpack_path
+            target.load_settings(json_settings)
         # restore
-        self.media.restore()
-        self.database.restore()
+        for target in self.targets:
+            target.restore()
         # remove tmp dir
         rmtree(unpack_path)
