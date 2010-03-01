@@ -187,8 +187,12 @@ class Directory(BackupTarget):
         logging.info('Restoring from %s' % self.dump_file)
 
         if self.remove_old_files:
-            rmtree(self.backup_dir)
-            os.mkdir(self.backup_dir)
+            # do not remove backup dir itself!
+            for root, dirs, files in os.walk(self.backup_dir, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
 
         command = 'tar xf %s -C %s .' % (os.path.join(self.unpack_path,
             self.dump_file), self.backup_dir)

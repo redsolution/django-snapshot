@@ -34,7 +34,7 @@ class Command(BaseCommand):
 
             try:
                 snapshots = os.listdir(snapshot_settings.SNAPSHOTS_DIR)
-                snapshots = sorted(snapshots)
+                snapshots = sorted(snapshots, reverse=True)
                 snapshot_filename = snapshots[number]
             except IndexError:
                 raise CommandError('Incorrect snapshot number')
@@ -46,7 +46,7 @@ class Command(BaseCommand):
         elif action == 'list':
             try:
                 snapshots = os.listdir(snapshot_settings.SNAPSHOTS_DIR)
-                snapshots = sorted(snapshots)
+                snapshots = sorted(snapshots, reverse=True)
             except OSError:
                 raise CommandError("Snapshots wasn't created")
             for i in range(len(snapshots)):
