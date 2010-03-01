@@ -204,6 +204,16 @@ class MediaDirectory(Directory):
     def __init__(self, settings_module):
         return super(MediaDirectory, self).__init__(settings_module.MEDIA_ROOT)
 
+class MediaUploadDirectory(Directory):
+    name = 'media_upload'
+    def __init__(self, settings_module):
+        # try import UPLOAD ROOT from settings, fault to 'upload'
+        upload_dir = getattr(settings_module, 'UPLOAD_ROOT', None)
+        if not upload_dir:
+            upload_dir = os.path.join(settings_module.MEDIA_ROOT, 'upload')
+        return super(MediaUploadDirectory, self).__init__(upload_dir)
+
+
 #===============================================================================
 # Collating objects class
 #===============================================================================
